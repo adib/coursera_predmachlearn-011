@@ -8,17 +8,25 @@ sansfont: Lucida Grande
 monofont: Menlo 
 ---
 
-```{r,echo=FALSE,message=FALSE}
+## Setup
+
+
+
+```{r,message=FALSE}
+library(plyr)
 library(dplyr)
 library(data.table)
+library(lubridate)
+library(caret)
+library(zoo)
+library(doMC)
+registerDoMC(cores = 8)
 ```
----
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
-
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+Data Loading and cleaning
 
 ```{r}
+remove(activityTest,activityTrain)
 downloadData <- function(tableName,sourceURL) {
     envirPos <- 1
     baseFolder <- "data"
@@ -37,11 +45,35 @@ downloadData <- function(tableName,sourceURL) {
         assign(tableName,readTable,pos=envirPos)
     }
 }
-downloadData("activityTest","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+downloadData("activityValidation","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
 downloadData("activityTrain","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+inputTrain <- activityTrain %>% 
+    mutate(V1=as.integer(V1), user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp), new_window=factor(new_window), classe=factor(classe)) %>% 
+    data.frame
+inputValidation <- activityValidation %>% mutate(V1=as.integer(V1),user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp),new_window=factor(new_window), min_yaw_forearm=as.numeric(min_yaw_forearm), skewness_pitch_forearm=as.numeric(skewness_pitch_forearm), skewness_yaw_forearm=as.numeric(skewness_yaw_forearm), problem_id=factor(problem_id)) %>% data.frame
+
+numericColumnRegex <- ".*(arm|dumbbell|belt).*"
+numericTrainColumnIndexes <- grep(numericColumnRegex,names(inputTrain))
+inputTrain[,numericTrainColumnIndexes] <- sapply(inputTrain[,numericTrainColumnIndexes],as.numeric)
+numericValidationColumnIndexes <- grep(numericColumnRegex,names(inputValidation))
+inputValidation[,numericValidationColumnIndexes] <- sapply(inputValidation[,numericValidationColumnIndexes],as.numeric)
+
+inputTrain<-na.locf(inputTrain)
+inputValidation<-na.locf(inputValidation)
 ```
 
 You can also embed plots, for example:
+
+```{r}
+set.seed(42)
+indexTraining <- createDataPartition(inputTrain$V1,p=0.6,list=FALSE)
+trainingSet <- inputTrain[indexTraining,] %>% select(-V1)
+testingSet<- inputTrain[-indexTraining,] %>% select(-V1)
+
+modfit <- train(classe ~ . ,preProcess="pca",method="rf",data=trainingSet)
+
+```
 
 ```{r, echo=FALSE}
 plot(cars)
