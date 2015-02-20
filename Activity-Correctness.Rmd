@@ -1,0 +1,50 @@
+---
+title: "Activity Correctess"
+author: "Sasmito Adibowo"
+date: "20 February 2015"
+output: html_document
+mainfont: Palatino
+sansfont: Lucida Grande
+monofont: Menlo 
+---
+
+```{r,echo=FALSE,message=FALSE}
+library(dplyr)
+library(data.table)
+```
+---
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r}
+downloadData <- function(tableName,sourceURL) {
+    envirPos <- 1
+    baseFolder <- "data"
+    downloadFilePath <- file.path(baseFolder,paste(tableName,"csv",sep="."))
+    downloadTablePath <- file.path(baseFolder,paste(tableName,"rds",sep="."))
+    if(!exists(tableName)) {
+        if(!file.exists(downloadTablePath)) {
+            if(!file.exists(downloadFilePath)) {
+                download.file(sourceURL,destfile=downloadFilePath)
+            }
+            readTable <- fread(downloadFilePath)
+            saveRDS(readTable,file=downloadTablePath)
+        } else {
+            readTable <- readRDS(downloadTablePath)
+        }
+        assign(tableName,readTable,pos=envirPos)
+    }
+}
+downloadData("activityTest","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+downloadData("activityTrain","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+```
+
+You can also embed plots, for example:
+
+```{r, echo=FALSE}
+plot(cars)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
