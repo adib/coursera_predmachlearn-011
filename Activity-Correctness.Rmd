@@ -20,13 +20,13 @@ library(lubridate)
 library(caret)
 library(zoo)
 library(doMC)
-registerDoMC(cores = 8)
+registerDoMC(cores = 4)
 ```
 
 Data Loading and cleaning
 
 ```{r}
-remove(activityTest,activityTrain)
+remove(activityValidation,activityTrain)
 downloadData <- function(tableName,sourceURL) {
     envirPos <- 1
     baseFolder <- "data"
@@ -49,29 +49,43 @@ downloadData("activityValidation","http://d396qusza40orc.cloudfront.net/predmach
 downloadData("activityTrain","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
 
 inputTrain <- activityTrain %>% 
-    mutate(V1=as.integer(V1), user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp), new_window=factor(new_window), classe=factor(classe)) %>% 
-    data.frame
-inputValidation <- activityValidation %>% mutate(V1=as.integer(V1),user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp),new_window=factor(new_window), min_yaw_forearm=as.numeric(min_yaw_forearm), skewness_pitch_forearm=as.numeric(skewness_pitch_forearm), skewness_yaw_forearm=as.numeric(skewness_yaw_forearm), problem_id=factor(problem_id)) %>% data.frame
+    mutate(V1=as.integer(V1), user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp), new_window=factor(new_window), classe=factor(classe)) %>% setkey(V1)
+inputValidation <- activityValidation %>% mutate(V1=as.integer(V1),user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp),new_window=factor(new_window), problem_id=factor(problem_id)) %>% setkey(V1)
 
-numericColumnRegex <- ".*(arm|dumbbell|belt).*"
-numericTrainColumnIndexes <- grep(numericColumnRegex,names(inputTrain))
-inputTrain[,numericTrainColumnIndexes] <- sapply(inputTrain[,numericTrainColumnIndexes],as.numeric)
-numericValidationColumnIndexes <- grep(numericColumnRegex,names(inputValidation))
-inputValidation[,numericValidationColumnIndexes] <- sapply(inputValidation[,numericValidationColumnIndexes],as.numeric)
+```
 
-inputTrain<-na.locf(inputTrain)
-inputValidation<-na.locf(inputValidation)
+Force numeric, carry forward `NA` values, and finally replace `NA` values with zeros.
+
+```{r}
+featureColumnIndexes <- 9:159
+
+cleanInput <- function(inputTable) {
+    na.replace <- function(x,r) {
+        ifelse(!is.na(x),x,r)
+    }
+    featureColumnNames <- names(inputTable)[featureColumnIndexes]
+    mutateExpression <- paste("mutate(inputTable,",paste(featureColumnNames,"=as.numeric(",featureColumnNames,")",sep="",collapse=","),")",sep="")    
+    inputTable <- eval(parse(text=mutateExpression)) %>% na.locf
+    mutateExpression <- paste("mutate(inputTable,",paste(featureColumnNames,"=na.replace(",featureColumnNames,",0)",sep="",collapse=","),")",sep="")
+    inputTable <- data.frame(eval(parse(text=mutateExpression)))
+    inputTable[,featureColumnIndexes] <- sapply(inputTable[,featureColumnIndexes],as.numeric)
+    inputTable
+}
+
+inputTrain <- cleanInput(inputTrain)
+inputValidation <- cleanInput(inputValidation)
 ```
 
 You can also embed plots, for example:
 
 ```{r}
 set.seed(42)
-indexTraining <- createDataPartition(inputTrain$V1,p=0.6,list=FALSE)
-trainingSet <- inputTrain[indexTraining,] %>% select(-V1)
-testingSet<- inputTrain[-indexTraining,] %>% select(-V1)
+modelFormula <- as.formula(paste("classe ~",paste(names(inputTrain)[featureColumnIndexes],collapse="+")))
+indexTraining <- createDataPartition(inputTrain$classe,p=0.6,list=FALSE)
+trainingSet <- inputTrain[indexTraining,] 
+testingSet<- inputTrain[-indexTraining,] 
 
-modfit <- train(classe ~ . ,preProcess="pca",method="rf",data=trainingSet)
+#modfit <- train(form=modelFormula,preProcess="pca",method="rf",data=trainingSet)
 
 ```
 
