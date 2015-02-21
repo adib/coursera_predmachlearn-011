@@ -98,7 +98,7 @@ if(!exists("modFit")) {
     modFitFile <- file.path(dataFolderName,"modFit.rds")
     if(!file.exists(modFitFile)) {
         # Train model
-        modFit <- train(form=modelFormula, method="nnet", data = trainingSet) 
+        modFit <- train(form=modelFormula, preProcess="pca",method="rf", trControl=trainControl(method="cv"), data=trainingSet) 
         saveRDS(modFit,modFitFile)
     } else {
         modFit <- readRDS(modFitFile)
@@ -122,7 +122,7 @@ Accuracy `r round(testEvaluation$overall["Accuracy"]*100)`% with a 95% confidenc
 
 ## Prediction result
 
-```{r, echo=FALSE}
+```{r,message=FALSE}
 predictionResult <- predict(modFit,inputValidation)
 resultTable <- data.table(problem_id=inputValidation$problem_id,user_name=inputValidation$user_name,result=predictionResult)
 kable(resultTable, format = "markdown")
@@ -134,6 +134,16 @@ Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. [Wearabl
 
 
 # Appendix
+
+## Summary of the validation data
+```{r}
+summary(inputValidation)
+```
+
+## Summary of the training data
+```{r}
+summary(inputTrain)
+```
 
 ## Model
 
