@@ -7,31 +7,33 @@ mainfont: Palatino
 sansfont: Lucida Grande
 monofont: Menlo 
 ---
+# Summary
 
+# Modeling
 ## Setup
 
 
-
 ```{r,message=FALSE}
+library(knitr)
 library(plyr)
 library(dplyr)
 library(data.table)
-library(lubridate)
 library(caret)
 library(zoo)
 library(doMC)
 registerDoMC(cores = 4)
+dataFolderName <- "data"
 ```
 
-Data Loading and cleaning
+## Data loading and cleaning
+
+Load Data
 
 ```{r}
-remove(activityValidation,activityTrain)
 downloadData <- function(tableName,sourceURL) {
     envirPos <- 1
-    baseFolder <- "data"
-    downloadFilePath <- file.path(baseFolder,paste(tableName,"csv",sep="."))
-    downloadTablePath <- file.path(baseFolder,paste(tableName,"rds",sep="."))
+    downloadFilePath <- file.path(dataFolderName,paste(tableName,"csv",sep="."))
+    downloadTablePath <- file.path(dataFolderName,paste(tableName,"rds",sep="."))
     if(!exists(tableName)) {
         if(!file.exists(downloadTablePath)) {
             if(!file.exists(downloadFilePath)) {
@@ -48,49 +50,93 @@ downloadData <- function(tableName,sourceURL) {
 downloadData("activityValidation","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
 downloadData("activityTrain","http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
 
-inputTrain <- activityTrain %>% 
-    mutate(V1=as.integer(V1), user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp), new_window=factor(new_window), classe=factor(classe)) %>% setkey(V1)
-inputValidation <- activityValidation %>% mutate(V1=as.integer(V1),user_name=factor(user_name), cvtd_timestamp=dmy_hms(cvtd_timestamp),new_window=factor(new_window), problem_id=factor(problem_id)) %>% setkey(V1)
-
 ```
 
-Force numeric, carry forward `NA` values, and finally replace `NA` values with zeros.
+Select Features
+
+Select certain features, these are the features in which the validation data contains full values (i.e no NA), hence we are assuming that these are the values that can be obtained reliably from the sensors
 
 ```{r}
-featureColumnIndexes <- 9:159
+selectedFeatures <- c("roll_belt", "pitch_belt", "yaw_belt", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "accel_belt_x", "accel_belt_y", "accel_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "roll_arm", "pitch_arm", "yaw_arm", "total_accel_arm", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "accel_arm_x", "accel_arm_y", "accel_arm_z", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell")
+```
 
+Clean input
+
+```{r}
 cleanInput <- function(inputTable) {
     na.replace <- function(x,r) {
         ifelse(!is.na(x),x,r)
     }
-    featureColumnNames <- names(inputTable)[featureColumnIndexes]
-    mutateExpression <- paste("mutate(inputTable,",paste(featureColumnNames,"=as.numeric(",featureColumnNames,")",sep="",collapse=","),")",sep="")    
-    inputTable <- eval(parse(text=mutateExpression)) %>% na.locf
-    mutateExpression <- paste("mutate(inputTable,",paste(featureColumnNames,"=na.replace(",featureColumnNames,",0)",sep="",collapse=","),")",sep="")
-    inputTable <- data.frame(eval(parse(text=mutateExpression)))
-    inputTable[,featureColumnIndexes] <- sapply(inputTable[,featureColumnIndexes],as.numeric)
-    inputTable
-}
+    outputTable <- data.table(inputTable)
+    outputTable <- mutate(outputTable, V1=as.integer(V1),user_name=factor(user_name))
 
-inputTrain <- cleanInput(inputTrain)
-inputValidation <- cleanInput(inputValidation)
+    featureColumnNames <- selectedFeatures
+    convertNumericExpression <- paste("mutate(outputTable,",paste(featureColumnNames,"=as.numeric(",featureColumnNames,")",sep="",collapse=","),")",sep="") 
+    inputTable <- eval(parse(text=convertNumericExpression))
+    carryForwardExpression <- paste("outputTable %>% group_by(user_name) %>% mutate(", paste(featureColumnNames, "=na.locf(",featureColumnNames,")", sep="",collapse=","),")",sep="")
+    outputTable <- eval(parse(text=carryForwardExpression))
+    outputTable
+}
+inputTrain <- mutate(cleanInput(activityTrain),classe=factor(classe)) %>% setkey(V1)
+inputValidation <- mutate(cleanInput(activityValidation),problem_id=as.integer(problem_id)) %>% setkey(problem_id)
 ```
 
-You can also embed plots, for example:
+## Model Training and Evaluation
 
 ```{r}
 set.seed(42)
-modelFormula <- as.formula(paste("classe ~",paste(names(inputTrain)[featureColumnIndexes],collapse="+")))
-indexTraining <- createDataPartition(inputTrain$classe,p=0.6,list=FALSE)
+modelFormula <- as.formula(paste("classe ~",paste(selectedFeatures,collapse="+")))
+indexTraining <- createDataPartition(inputTrain$classe,p=0.6,list=TRUE)$Resample1
 trainingSet <- inputTrain[indexTraining,] 
-testingSet<- inputTrain[-indexTraining,] 
+testingSet <- inputTrain[-indexTraining,] 
+```
 
-#modfit <- train(form=modelFormula,preProcess="pca",method="rf",data=trainingSet)
+Train the model. We cache the model to avoid re-training the model when re-generating this markdown file
+
+```{r}
+if(!exists("modFit")) {
+    modFitFile <- file.path(dataFolderName,"modFit.rds")
+    if(!file.exists(modFitFile)) {
+        # Train model
+        modFit <- train(form=modelFormula, method="nnet", data = trainingSet) 
+        saveRDS(modFit,modFitFile)
+    } else {
+        modFit <- readRDS(modFitFile)
+    }
+}
 
 ```
+
+Out of sample error estimation
+Check accuracy by running the model against the test set
+
+```{r,message=FALSE}
+testPrediction <- predict(modFit,testingSet)
+testEvaluation <- confusionMatrix(testPrediction,testingSet$classe)
+testEvaluation
+```
+
+
+Accuracy `r round(testEvaluation$overall["Accuracy"]*100)`% with a 95% confidence interval of (`r round(testEvaluation$overall["AccuracyLower"]*100,1)`%, `r round(testEvaluation$overall["AccuracyUpper"]*100,1)`%)
+(accuracy) 
+
+## Prediction result
 
 ```{r, echo=FALSE}
-plot(cars)
+predictionResult <- predict(modFit,inputValidation)
+resultTable <- data.table(problem_id=inputValidation$problem_id,user_name=inputValidation$user_name,result=predictionResult)
+kable(resultTable, format = "markdown")
 ```
 
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+# References
+
+Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335). Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
+
+
+# Appendix
+
+## Model
+
+```{r}
+summary(modFit)
+```
