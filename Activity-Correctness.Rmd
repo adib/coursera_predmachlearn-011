@@ -1,5 +1,5 @@
 ---
-title: "Activity Correctess"
+title: "Weight Lifting Excercise Correctness"
 author: "Sasmito Adibowo"
 date: "20 February 2015"
 output: html_document
@@ -7,10 +7,20 @@ mainfont: Palatino
 sansfont: Lucida Grande
 monofont: Menlo 
 ---
+
 # Summary
 
+We attempt to predict the quality of weight lifting excercise in terms of its correctness given that the person being evaluated wears certain sensors strategically placed throughout his/her body. This report shows that movement sensors placed in the belt, arm, and dumbell are able to classify the person's weight lifting excercise conformance with a high degree of accuracy (with an expected correct classification of over 90%).
+
+This report is a deliverable of Coursera class _Practical Machine Learning_ by Jeff Leek, et. al. 
+
 # Modeling
+
+We load the source sensor data (Ugulino et.al, 2012) and then perform [random forest](http://en.wikipedia.org/wiki/Random_forest) classification to obtain the model. Model testing is done by partitioning the source data at random into roughly 60% training set and the rest to be the test set.
+
 ## Setup
+
+These are the R packages that are used in this report. We also use R's multiprocessing capabilities and set the number of workers to four, which should work well on many modern laptops. Furthermore to run this report, we expect a `data` sub-folder already created to store the additional cached data to help facilitate re-running the report.
 
 
 ```{r,message=FALSE}
@@ -27,7 +37,7 @@ dataFolderName <- "data"
 
 ## Data loading and cleaning
 
-Load Data
+We download the source data files from the class' website and then cache those as local files.
 
 ```{r}
 downloadData <- function(tableName,sourceURL) {
@@ -52,15 +62,20 @@ downloadData("activityTrain","http://d396qusza40orc.cloudfront.net/predmachlearn
 
 ```
 
-Select Features
-
-Select certain features, these are the features in which the validation data contains full values (i.e no NA), hence we are assuming that these are the values that can be obtained reliably from the sensors
+Upon quick inspection of the validation data set, there are only certain feature columns that fully contains values (i.e., most of these columns are _not_ `NA` or blanks). Hence we assume that these are the valid sensor values of any subsequent readings that may be fed into the model and then only use these features as part of the training data.
 
 ```{r}
 selectedFeatures <- c("roll_belt", "pitch_belt", "yaw_belt", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "accel_belt_x", "accel_belt_y", "accel_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "roll_arm", "pitch_arm", "yaw_arm", "total_accel_arm", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "accel_arm_x", "accel_arm_y", "accel_arm_z", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "roll_dumbbell", "pitch_dumbbell", "yaw_dumbbell")
 ```
 
-Clean input
+We perform the following data cleaning steps on both the test and validation data sets:
+
+ * Select just the columns that are fully populated which the validation data set.
+ * Coerce those feature columns into numeric.
+ * Convert the user names into factors.
+ * Use _last observation carried forward_ to impute any NA values.
+
+In addition, we also convert the observation result (column `classe`) into factors and the validation set `problem_id` into integer.
 
 ```{r}
 cleanInput <- function(inputTable) {
@@ -81,23 +96,27 @@ inputTrain <- mutate(cleanInput(activityTrain),classe=factor(classe)) %>% setkey
 inputValidation <- mutate(cleanInput(activityValidation),problem_id=as.integer(problem_id)) %>% setkey(problem_id)
 ```
 
+
 ## Model Training and Evaluation
+
+We split the input data into two parts for cross validation purposes, with approximately 60% of the rows are for training the model and the rest for estimating its correctness. For reproducability, we purposely initialize the random number generator to a known value.
+
 
 ```{r}
 set.seed(42)
-modelFormula <- as.formula(paste("classe ~",paste(selectedFeatures,collapse="+")))
 indexTraining <- createDataPartition(inputTrain$classe,p=0.6,list=TRUE)$Resample1
 trainingSet <- inputTrain[indexTraining,] 
 testingSet <- inputTrain[-indexTraining,] 
 ```
 
-Train the model. We cache the model to avoid re-training the model when re-generating this markdown file
+Having the training and cross-validation data sets, we train the model using the [random forest](http://en.wikipedia.org/wiki/Random_forest) method and pre-process it through [principal component analysis](http://en.wikipedia.org/wiki/Principal_component_analysis). As this is a lengthy process, we cache the resulting model to a file to facilitate re-running the report.
 
 ```{r}
 if(!exists("modFit")) {
     modFitFile <- file.path(dataFolderName,"modFit.rds")
     if(!file.exists(modFitFile)) {
         # Train model
+        modelFormula <- as.formula(paste("classe ~",paste(selectedFeatures,collapse="+")))
         modFit <- train(form=modelFormula, preProcess="pca",method="rf", trControl=trainControl(method="cv"), data=trainingSet) 
         saveRDS(modFit,modFitFile)
     } else {
@@ -107,8 +126,7 @@ if(!exists("modFit")) {
 
 ```
 
-Out of sample error estimation
-Check accuracy by running the model against the test set
+Having the model at hand, we then estimate its out-of-sample error by running its prediction and then comparing the results with known values from the test set.
 
 ```{r,message=FALSE}
 testPrediction <- predict(modFit,testingSet)
@@ -117,10 +135,11 @@ testEvaluation
 ```
 
 
-Accuracy `r round(testEvaluation$overall["Accuracy"]*100)`% with a 95% confidence interval of (`r round(testEvaluation$overall["AccuracyLower"]*100,1)`%, `r round(testEvaluation$overall["AccuracyUpper"]*100,1)`%)
-(accuracy) 
+This model has a `r round(testEvaluation$overall["Accuracy"]*100)`% prediction accuracy with a confidence interval between `r round(testEvaluation$overall["AccuracyLower"]*100,1)`% and `r round(testEvaluation$overall["AccuracyUpper"]*100,1)`% inclusive -- in other words, we expect that 95% of the time the accuracy should fall under that range.
 
 ## Prediction result
+
+Lastly we run the model against the validation set to obtain a prediction result.
 
 ```{r,message=FALSE}
 predictionResult <- predict(modFit,inputValidation)
@@ -132,10 +151,10 @@ kable(resultTable, format = "markdown")
 
 Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. [Wearable Computing: Accelerometers' Data Classification of Body Postures and Movements](http://groupware.les.inf.puc-rio.br/work.jsf?p1=10335). Proceedings of 21st Brazilian Symposium on Artificial Intelligence. Advances in Artificial Intelligence - SBIA 2012. In: Lecture Notes in Computer Science. , pp. 52-61. Curitiba, PR: Springer Berlin / Heidelberg, 2012. ISBN 978-3-642-34458-9. DOI: 10.1007/978-3-642-34459-6_6. 
 
-
 # Appendix
 
 ## Summary of the validation data
+
 ```{r}
 summary(inputValidation)
 ```
